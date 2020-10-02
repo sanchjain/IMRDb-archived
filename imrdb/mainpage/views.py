@@ -4,6 +4,8 @@ from django.shortcuts import render, redirect, get_object_or_404
 from django.db.models import Q
 import pickle
 from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
+from star_ratings.models import UserRating
+from django.http import HttpResponse
 
 
 
@@ -26,7 +28,8 @@ def homepage(request):
         movies = paginator.page(paginator.num_pages)
 
     if request.method == "POST":
-        predict()
+        names = predict()
+        return HttpResponse(names)
     else:
         return render(request, 'mainpage/index.html', {'movies': movies})
 
@@ -60,6 +63,8 @@ class SAE(nn.Module):
 
 def predict():
     print("called")
+
+    user_ratings = UserRating.objects.all()
     dataset = pd.read_csv(os.path.dirname(os.path.realpath(__file__)) + "/ratings.csv")
     movies = pd.read_csv(os.path.dirname(os.path.realpath(__file__)) + "/filtered_movies.csv")
 
@@ -107,5 +112,7 @@ def predict():
         value = movies.iat[value[0], 2]
         names.append(value)
     print(names)
+
+    return names
 
 
