@@ -48,17 +48,23 @@ import os
 class SAE(nn.Module):
     def __init__(self, nb_movies):
         super(SAE, self).__init__()
-        self.fc1 = nn.Linear(nb_movies, 20)
-        self.fc2 = nn.Linear(20, 8)
-        self.fc3 = nn.Linear(8, 20)
-        self.fc4 = nn.Linear(20, nb_movies)
+        self.fc1 = nn.Linear(nb_movies, 500)
+        self.fc2 = nn.Linear(500, 20)
+        self.fc3 = nn.Linear(20, 8)
+        self.fc4 = nn.Linear(8, 20)
+        self.fc5 = nn.Linear(20, 500)
+        self.fc6 = nn.Linear(500, nb_movies)
         self.activation = nn.Tanh()
+
     def forward(self, x):
         x = self.activation(self.fc1(x))
         x = self.activation(self.fc2(x))
         x = self.activation(self.fc3(x))
-        x = self.fc4(x)
+        x = self.activation(self.fc4(x))
+        x = self.activation(self.fc5(x))
+        x = self.fc6(x)
         return x
+
 
 
 def predict():
@@ -95,14 +101,13 @@ def predict():
     nb_movies = len(dataset.movieId.unique())
 
     model = SAE(nb_movies)
-    print(os.path.dirname(os.path.realpath(__file__)) + "/sae_200.pt")
-    model.load_state_dict(torch.load(os.path.dirname(os.path.realpath(__file__)) + "/sae_200.pt", map_location=torch.device('cpu')))
+    print(os.path.dirname(os.path.realpath(__file__)) + "/new_sae_200.pt")
+    model.load_state_dict(torch.load(os.path.dirname(os.path.realpath(__file__)) + "/new_sae_200.pt", map_location=torch.device('cpu')))
 
     arr = torch.FloatTensor(arr)
     print(arr)
     output = model(arr)
     output = output.detach().numpy()
-    output[input != 0] = 0  # make output for movies rated 0
     print(output)
     print(len(output))
 
