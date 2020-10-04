@@ -70,34 +70,49 @@ def predict():
 
     pivot_table = dataset.pivot_table(index = ["userId"], columns = ["movieId"], values = "rating", fill_value=0)
     table = pivot_table.to_numpy()
-
-    data = pd.merge(dataset, movies)
-    data = data.drop(["timestamp", "movieId"], axis=1)
-
-    sel_movies = data[data["userId"]==2]
-    input = table[50]  # for user 2
-    print(input)
-    print(len(input))
     cols = pivot_table.columns
+    print(user_ratings)
 
-    arr = np.array(dataset, dtype='int')
-    nb_users = int(max(arr[:, 0]))
+    d = {}
+    for index in user_ratings:
+        movie = Movie.objects.get(id=index.rating.object_id)
+        d[movie.movie_id] = index.score
+    # d = {
+    #     1: 5,
+    #     2: 5,
+    # }
+
+    print(d)
+    arr = np.zeros((9724), dtype=np.float32)
+    print(arr)
+    for i,value in enumerate(cols):
+        if value in d.keys():
+            print(d[value])
+            arr[i] = d[value]
+    
+    a = np.array(dataset, dtype='int')
+    nb_users = int(max(a[:, 0]))
     nb_movies = len(dataset.movieId.unique())
 
     model = SAE(nb_movies)
     print(os.path.dirname(os.path.realpath(__file__)) + "/sae_200.pt")
     model.load_state_dict(torch.load(os.path.dirname(os.path.realpath(__file__)) + "/sae_200.pt", map_location=torch.device('cpu')))
 
-    input = torch.FloatTensor(input)
-    output = model(input)
+    arr = torch.FloatTensor(arr)
+    print(arr)
+    output = model(arr)
     output = output.detach().numpy()
     output[input != 0] = 0  # make output for movies rated 0
     print(output)
     print(len(output))
+
+    output[arr!=0] = -1
+    # print(arr)
+    # print(output)
     l = []
-    for i in range(10):
+    for i in range(50):
         j = np.argmax(output)
-        output[j] = 0
+        output[j] = -1
         l.append(j)
     # indices
 
