@@ -2,68 +2,137 @@ from django.shortcuts import render
 from .models import Movie
 from django.shortcuts import render, redirect, get_object_or_404
 from django.db.models import Q
-from rest_framework import viewsets
-from rest_framework import mixins
-from .models import Endpoint, MLAlgorithm, MLAlgorithmStatus, MLRequest
-from .serializers import EndpointSerializer, MLAlgorithmSerializer, MLAlgorithmStatusSerializer, MLRequestSerializer
+import pickle
+from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
+from star_ratings.models import UserRating
+from django.http import HttpResponse
+
 
 
 # Create your views here.
 def homepage(request):
-    movies = Movie.objects.all()
+    movies_list = Movie.objects.all()
+    page = request.GET.get('page', 1)
     query = request.GET.get("q")
     if query:
-        movies = movies.filter(
+        movies_list = movies_list.filter(
             Q(name__icontains=query)
         ).distinct()
-    return render(request, 'mainpage/index.html', {'movies': movies})
+
+    paginator = Paginator(movies_list, 48)
+    try:
+        movies = paginator.page(page)
+    except PageNotAnInteger:
+        movies = paginator.page(1)
+    except EmptyPage:
+        movies = paginator.page(paginator.num_pages)
+
+    if request.method == "POST":
+        names = predict()
+        return HttpResponse(names)
+    else:
+        return render(request, 'mainpage/index.html', {'movies': movies})
 
 
-class EndpointViewSet(
-    mixins.RetrieveModelMixin, mixins.ListModelMixin, viewsets.GenericViewSet
-):
-    serializer_class = EndpointSerializer
-    queryset = Endpoint.objects.all()
+import numpy as np
+import pandas as pd
+import torch
+import torch.nn as nn
+import torch.nn.parallel
+import torch.optim as optim
+import torch.utils.data
+from torch.autograd import Variable
+import os
 
 
-class MLAlgorithmViewSet(
-    mixins.RetrieveModelMixin, mixins.ListModelMixin, viewsets.GenericViewSet
-):
-    serializer_class = MLAlgorithmSerializer
-    queryset = MLAlgorithm.objects.all()
+class SAE(nn.Module):
+    def __init__(self, nb_movies):
+        super(SAE, self).__init__()
+        self.fc1 = nn.Linear(nb_movies, 500)
+        self.fc2 = nn.Linear(500, 20)
+        self.fc3 = nn.Linear(20, 8)
+        self.fc4 = nn.Linear(8, 20)
+        self.fc5 = nn.Linear(20, 500)
+        self.fc6 = nn.Linear(500, nb_movies)
+        self.activation = nn.Tanh()
 
-
-def deactivate_other_statuses(instance):
-    old_statuses = MLAlgorithmStatus.objects.filter(parent_mlalgorithm = instance.parent_mlalgorithm,
-                                                        created_at__lt=instance.created_at,
-                                                        active=True)
-    for i in range(len(old_statuses)):
-        old_statuses[i].active = False
-    MLAlgorithmStatus.objects.bulk_update(old_statuses, ["active"])
-
-
-class MLAlgorithmStatusViewSet(
-    mixins.RetrieveModelMixin, mixins.ListModelMixin, viewsets.GenericViewSet,
-    mixins.CreateModelMixin
-):
-    serializer_class = MLAlgorithmStatusSerializer
-    queryset = MLAlgorithmStatus.objects.all()
-    def perform_create(self, serializer):
-        try:
-            with transaction.atomic():
-                instance = serializer.save(active=True)
-                # set active=False for other statuses
-                deactivate_other_statuses(instance)
+    def forward(self, x):
+        x = self.activation(self.fc1(x))
+        x = self.activation(self.fc2(x))
+        x = self.activation(self.fc3(x))
+        x = self.activation(self.fc4(x))
+        x = self.activation(self.fc5(x))
+        x = self.fc6(x)
+        return x
 
 
 
-        except Exception as e:
-            raise APIException(str(e))
-        
+def predict():
+    print("called")
 
-class MLRequestViewSet(
-    mixins.RetrieveModelMixin, mixins.ListModelMixin, viewsets.GenericViewSet,
-    mixins.UpdateModelMixin
-):
-    serializer_class = MLRequestSerializer
-    queryset = MLRequest.objects.all()
+    user_ratings = UserRating.objects.all()
+    dataset = pd.read_csv(os.path.dirname(os.path.realpath(__file__)) + "/ratings.csv")
+    movies = pd.read_csv(os.path.dirname(os.path.realpath(__file__)) + "/filtered_movies.csv")
+
+    pivot_table = dataset.pivot_table(index = ["userId"], columns = ["movieId"], values = "rating", fill_value=0)
+    table = pivot_table.to_numpy()
+    cols = pivot_table.columns
+    print(user_ratings)
+
+    d = {}
+    for index in user_ratings:
+        movie = Movie.objects.get(id=index.rating.object_id)
+        d[movie.movie_id] = index.score
+    # d = {
+    #     1: 5,
+    #     2: 5,
+    # }
+
+    print(d)
+    arr = np.zeros((9724), dtype=np.float32)
+    print(arr)
+    for i,value in enumerate(cols):
+        if value in d.keys():
+            print(d[value])
+            arr[i] = d[value]
+    
+    a = np.array(dataset, dtype='int')
+    nb_users = int(max(a[:, 0]))
+    nb_movies = len(dataset.movieId.unique())
+
+    model = SAE(nb_movies)
+    print(os.path.dirname(os.path.realpath(__file__)) + "/new_sae_200.pt")
+    model.load_state_dict(torch.load(os.path.dirname(os.path.realpath(__file__)) + "/new_sae_200.pt", map_location=torch.device('cpu')))
+
+    arr = torch.FloatTensor(arr)
+    print(arr)
+    output = model(arr)
+    output = output.detach().numpy()
+    print(output)
+    print(len(output))
+
+    output[arr!=0] = -1
+    # print(arr)
+    # print(output)
+    l = []
+    for i in range(50):
+        j = np.argmax(output)
+        output[j] = -1
+        l.append(j)
+    # indices
+
+    ids = []
+    for i in l:
+        ids.append(cols[i])
+    # movie ids
+
+    names = []
+    for i in ids:
+        value = movies.loc[movies.movieId == i].index
+        value = movies.iat[value[0], 2]
+        names.append(value)
+    print(names)
+
+    return names
+
+
